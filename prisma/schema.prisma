@@ -1,0 +1,417 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+  COMPANY_ADMIN
+  SUPER_ADMIN
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+  SUSPENDED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  TRIAL
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum LessonType {
+  VIDEO
+  TEXT
+  QUIZ
+  ASSIGNMENT
+  PROJECT
+}
+
+// Core Models
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  emailVerified     DateTime?
+  password          String?
+  firstName         String?
+  lastName          String?
+  avatar            String?
+  role              UserRole  @default(STUDENT)
+  isActive          Boolean   @default(true)
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Profile completion for onboarding
+  profileCompleted  Boolean   @default(false)
+  onboardingStep    Int       @default(0)
+
+  // Relationships
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+  organizationId    String?
+
+  // Student relationships
+  enrollments       Enrollment[]
+  progress          Progress[]
+  certificates      Certificate[]
+  aiChatSessions    AIChatSession[]
+
+  // Instructor relationships
+  coursesCreated    Course[]
+  instructorProfile InstructorProfile?
+
+  // Company admin relationships
+  managedCourses    Course[] @relation("CompanyManagedCourses")
+
+  // Authentication
+  accounts          Account[]
+  sessions          Session[]
+
+  @@map("users")
+}
+
+model Organization {
+  id              String             @id @default(cuid())
+  name            String
+  slug            String             @unique
+  description     String?
+  logo            String?
+  website         String?
+  industry        String?
+  size            String?
+  isActive        Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  // Relationships
+  users           User[]
+  courses         Course[]
+  subscriptions   Subscription[]
+
+  @@map("organizations")
+}
+
+model InstructorProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  bio             String?
+  expertise       String[]
+  socialLinks     Json?
+  isVerified      Boolean   @default(false)
+  rating          Float?
+  totalStudents   Int       @default(0)
+  totalCourses    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relationships
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("instructor_profiles")
+}
+
+model Course {
+  id              String        @id @default(cuid())
+  title           String
+  slug            String        @unique
+  description     String?
+  shortDescription String?
+  thumbnail       String?
+  price           Float         @default(0)
+  isFree          Boolean       @default(true)
+  isPublished     Boolean       @default(false)
+  status          CourseStatus  @default(DRAFT)
+  level           String?       // Beginner, Intermediate, Advanced
+  duration        Int?          // in minutes
+  language        String        @default("en")
+  tags            String[]
+  requirements    String[]
+  learningOutcomes String[]
+
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+
+  // Analytics
+  viewCount       Int           @default(0)
+  enrollmentCount Int           @default(0)
+  rating          Float?
+  reviewCount     Int           @default(0)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  publishedAt     DateTime?
+
+  // Relationships
+  instructor      User          @relation(fields: [instructorId], references: [id])
+  instructorId    String
+
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  organizationId  String?
+
+  companyManager  User?         @relation("CompanyManagedCourses", fields: [companyManagerId], references: [id])
+  companyManagerId String?
+
+  lessons         Lesson[]
+  enrollments     Enrollment[]
+  reviews         Review[]
+  categories      CourseCategory[]
+
+  @@map("courses")
+}
+
+model Lesson {
+  id              String      @id @default(cuid())
+  title           String
+  slug            String
+  description     String?
+  content         String?     // Rich text content
+  type            LessonType  @default(TEXT)
+  duration        Int?        // in minutes
+  videoUrl        String?
+  videoThumbnail  String?
+  attachments     Json?       // Array of file URLs
+  order           Int
+  isFree          Boolean     @default(false)
+  isPublished     Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relationships
+  course          Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId        String
+  progress        Progress[]
+
+  @@unique([courseId, slug])
+  @@map("lessons")
+}
+
+model Enrollment {
+  id              String           @id @default(cuid())
+  status          EnrollmentStatus @default(ACTIVE)
+  progress        Float            @default(0) // 0-100
+  completedAt     DateTime?
+  certificateIssued Boolean        @default(false)
+  enrolledAt      DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relationships
+  student         User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId       String
+  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId        String
+
+  @@unique([studentId, courseId])
+  @@map("enrollments")
+}
+
+model Progress {
+  id              String    @id @default(cuid())
+  completed       Boolean   @default(false)
+  timeSpent       Int       @default(0) // in seconds
+  lastAccessedAt  DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relationships
+  student         User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId       String
+  lesson          Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  lessonId        String
+
+  @@unique([studentId, lessonId])
+  @@map("progress")
+}
+
+model Review {
+  id              String    @id @default(cuid())
+  rating          Int       // 1-5
+  comment         String?
+  isPublished     Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relationships
+  student         User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId       String
+  course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId        String
+
+  @@unique([studentId, courseId])
+  @@map("reviews")
+}
+
+model Certificate {
+  id              String    @id @default(cuid())
+  certificateUrl  String
+  issuedAt        DateTime  @default(now())
+  expiresAt       DateTime?
+
+  // Relationships
+  student         User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId       String
+
+  @@map("certificates")
+}
+
+model Category {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  slug            String           @unique
+  description     String?
+  icon            String?
+  color           String?
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relationships
+  courses         CourseCategory[]
+
+  @@map("categories")
+}
+
+model CourseCategory {
+  course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId        String
+  category        Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId      String
+
+  @@id([courseId, categoryId])
+  @@map("course_categories")
+}
+
+// Subscription & Payment Models
+model Subscription {
+  id              String             @id @default(cuid())
+  status          SubscriptionStatus @default(TRIAL)
+  planName        String
+  price           Float
+  billingCycle    String             // monthly, yearly
+  startDate       DateTime           @default(now())
+  endDate         DateTime
+  autoRenew       Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  // Relationships
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId  String
+  payments        Payment[]
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  amount          Float
+  currency        String        @default("USD")
+  status          PaymentStatus @default(PENDING)
+  paymentMethod   String?
+  stripePaymentId String?       @unique
+  description     String?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relationships
+  subscription    Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscriptionId  String
+
+  @@map("payments")
+}
+
+// AI Chat Models
+model AIChatSession {
+  id              String        @id @default(cuid())
+  title           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relationships
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String
+  messages        AIChatMessage[]
+
+  @@map("ai_chat_sessions")
+}
+
+model AIChatMessage {
+  id              String        @id @default(cuid())
+  content         String
+  role            String        // user, assistant, system
+  createdAt       DateTime      @default(now())
+
+  // Relationships
+  session         AIChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId       String
+
+  @@map("ai_chat_messages")
+}
+
+// NextAuth.js Models (for frontend compatibility)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
